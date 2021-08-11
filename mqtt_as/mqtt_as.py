@@ -481,6 +481,8 @@ class MQTTClient(MQTT_base):
                 while s.status() == network.STAT_CONNECTING:  # Break out on fail or success. Check once per sec.
                     await asyncio.sleep(1)
         else:
+            if s.isconnected():  # 1st attempt, already connected.
+                return
             s.active(True)
             s.connect(self._ssid, self._wifi_pw)
             if PYBOARD:  # Doesn't yet have STAT_CONNECTING constant
