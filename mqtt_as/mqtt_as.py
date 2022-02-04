@@ -129,7 +129,9 @@ class MQTT_base:
             raise ValueError('no server specified.')
         self._sock = None
         self._sta_if = network.WLAN(network.STA_IF)
+        self._ap_if = network.WLAN(network.AP_IF)
         self._sta_if.active(True)
+        self._ap_if.active(False)
 
         self.newpid = pid_gen()
         self.rcv_pids = set()  # PUBACK and SUBACK pids awaiting ACK response
