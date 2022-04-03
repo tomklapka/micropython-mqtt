@@ -230,8 +230,7 @@ with the topic `foo_topic` the topic and message are printed. The code
 periodically publishes an incrementing count under the topic `result`.
 
 ```python
-from mqtt_as import MQTTClient
-from config import config
+from mqtt_as import MQTTClient, config
 import uasyncio as asyncio
 
 SERVER = '192.168.0.10'  # Change to suit e.g. 'iot.eclipse.org'
@@ -310,7 +309,8 @@ attempt to connect to the specified LAN.
 'keepalive' [60] Period (secs) before broker regards client as having died.  
 'ping_interval' [0] Period (secs) between broker pings. 0 == use default.  
 'ssl' [False] If `True` use SSL.  
-'ssl_params' [{}]  
+'ssl_params' [{}] See [this post](https://forum.micropython.org/viewtopic.php?f=18&t=11906#p65746)
+for details on how to populate this dictionary.
 'response_time' [10] Time in which server is expected to respond (s). See note
 below.  
 'clean_init' [`True`] Clean Session state on initial connection.  
@@ -382,10 +382,13 @@ until the WiFi/broker are accessible.
 operation.
 
 Args:
- 1. `topic`
- 2. `msg`
- 3. `retain=False`
- 4. `qos=0`
+ 1. `topic` A bytes or bytearray object.
+ 2. `msg` A bytes or bytearray object. 
+ 3. `retain=False` Boolean.
+ 4. `qos=0` Integer.
+
+Messages and topics may be strings provided that all characters have ordinal
+values <= 127 (Unicode single byte characters).
 
 ### 3.2.3 subscribe
 
@@ -398,8 +401,8 @@ The coro will pause until a `SUBACK` has been received from the broker, if
 necessary reconnecting to a failed network.
 
 Args:
- 1. `topic`
- 2. `qos=0`
+ 1. `topic` A bytes or bytearray object. Or string as described above.
+ 2. `qos=0` Integer.
 
 ### 3.2.4 isconnected
 

@@ -313,11 +313,15 @@ class MQTT_base:
         except OSError:
             pass
         self._has_connected = False
-        self.close()
+        self._close()
 
-    def close(self):
+    def _close(self):
         if self._sock is not None:
             self._sock.close()
+
+    def close(self):  # API. See https://github.com/peterhinch/micropython-mqtt/issues/60
+        self._close()
+        self._sta_if.active(False)
 
     async def _await_pid(self, pid):
         t = ticks_ms()
@@ -522,7 +526,7 @@ class MQTTClient(MQTT_base):
         try:
             await self._connect(clean)
         except Exception:
-            self.close()
+            self._close()
             raise
         self.rcv_pids.clear()
         # If we get here without error broker/LAN must be up.
@@ -589,7 +593,7 @@ class MQTTClient(MQTT_base):
     def _reconnect(self):  # Schedule a reconnection if not underway.
         if self._isconnected:
             self._isconnected = False
-            self.close()
+            self._close()
             asyncio.create_task(self._wifi_handler(False))  # User handler.
 
     # Await broker connection.
@@ -621,7 +625,7 @@ class MQTTClient(MQTT_base):
                 except OSError as e:
                     self.dprint('Error in reconnect.', e)
                     # Can get ECONNABORTED or -1. The latter signifies no or bad CONNACK received.
-                    self.close()  # Disconnect and try again.
+                    self._close()  # Disconnect and try again.
                     self._in_connect = False
                     self._isconnected = False
         self.dprint('Disconnected, exited _keep_connected')
