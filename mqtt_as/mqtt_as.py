@@ -69,7 +69,6 @@ config = {
     'connect_coro':  eliza,
     'ssid':          None,
     'wifi_pw':       None,
-    'beacon_interval': 1
 }
 
 
@@ -115,7 +114,6 @@ class MQTT_base:
         # WiFi config
         self._ssid = config['ssid']  # Required for ESP32 / Pyboard D. Optional ESP8266
         self._wifi_pw = config['wifi_pw']
-        self._beacon_interval = config['beacon_interval']
         self._ssl = config['ssl']
         self._ssl_params = config['ssl_params']
         # Callbacks and coros
@@ -488,13 +486,6 @@ class MQTTClient(MQTT_base):
                 s.connect(self._ssid, self._wifi_pw)
                 while s.status() == network.STAT_CONNECTING:  # Break out on fail or success. Check once per sec.
                     await asyncio.sleep(1)
-        if ESP32:
-            if s.isconnected():  # 1st attempt, already connected.
-                return
-            s.active(True)
-            s.connect(self._ssid, self._wifi_pw, listen_interval=self._beacon_interval)
-            while s.status() == network.STAT_CONNECTING:  # Break out on fail or success. Check once per sec.
-                await asyncio.sleep(1)
         else:
             if s.isconnected():  # 1st attempt, already connected.
                 return
@@ -517,12 +508,12 @@ class MQTTClient(MQTT_base):
         if not s.isconnected():
             raise OSError
         # Ensure connection stays up for a few secs.
-        self.dprint('Checking WiFi integrity.')
-        for _ in range(5):
-            if not s.isconnected():
-                raise OSError  # in 1st 5 secs
-            await asyncio.sleep(1)
-        self.dprint('Got reliable connection')
+        # self.dprint('Checking WiFi integrity.')
+        # for _ in range(5):
+        #     if not s.isconnected():
+        #         raise OSError  # in 1st 5 secs
+        #     await asyncio.sleep(1)
+        # self.dprint('Got reliable connection')
 
     async def connect(self):
         if not self._has_connected:
