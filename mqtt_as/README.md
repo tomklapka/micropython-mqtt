@@ -21,6 +21,7 @@ application level.
   1.4 [ESP8266 Limitations](./README.md#14-esp8266-limitations)  
   1.5 [ESP32 Issues](./README.md#15-esp32-issues)  
   1.6 [Pyboard D](./README.md#16-pyboard-d)  
+  1.7 [Arduino Nano RP2040 Connect](./README.md#17-arduino-nano-rp2040-connect)  
  2. [Getting started](./README.md#2-getting_started)  
   2.1 [Program files](./README.md#21-program-files)  
   2.2 [Installation](./README.md#22-installation)  
@@ -44,7 +45,8 @@ application level.
   4.3 [Client subscriptions with qos == 1](./README.md#43-client-subscriptions-with-qos-1)  
   4.4 [Application Design](./README.md#44-application-design)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.4.1 [Publication Timeouts](./README.md#441-publication-timeouts)  
- 5. [Low Power Demo](./README.md#5-low-power-demo) Note: Pyboard D specific and highly experimental.  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.4.2 [Behaviour on power up](./README.md#442-behaviour-on-power-up)  
+ 5. [Low Power Demo](./README.md#5-low-power-demo)  
  6. [References](./README.md#6-references)  
 
 ## 1.1 Rationale
@@ -94,50 +96,38 @@ that use it. It uses nonblocking sockets and does not block the scheduler. The
 design is based on the official `umqtt` library but it has been substantially
 modified for resilience and for asynchronous operation.
 
-Hardware support: Pyboard D, ESP8266 and ESP32.  
-Firmware support: Official firmware, but see below.  
+Hardware support: Pyboard D, ESP8266, ESP32, ESP32-S2 and Arduino Nano RP2040
+Connect.  
+Firmware support: Official MicroPython firmware.  
 Broker support: Mosquitto is preferred for its excellent MQTT compliance.  
 Protocol: Currently the module supports a subset of MQTT revision 3.1.1.
-
-#### Firmware
-
-A release later than V1.13 must be used.
 
 ## 1.3 Project Status
 
 Initial development was by Peter Hinch. Thanks are due to Kevin Köck for
 providing and testing a number of bugfixes and enhancements.
 
+10 June 2022
+Lowpower demo removed as it required an obsolete version of `uasyncio`.
+Improved handling of `clean_init` (issue #40).
+
+21 May 2022
+SSL/TLS ESP8266 support contributed by @SooOverpowered: see `tls8266.py`.
+
+22 Apr 2022
+Support added for Arduino Nano RP2040 Connect. See note below.
+
 2 Aug 2021
 SSL/TLS on ESP32 has now been confirmed working.
 [Reference](https://github.com/peterhinch/micropython-mqtt/pull/58).
-
-SSL/TLS on ESP8266 is
-[not supported](https://github.com/micropython/micropython/issues/7473#issuecomment-871074210),
-and it looks as if this isn't going to be fixed in the near future.
-
-8th April 2020-10th March 2021
-Adapted for new `uasyncio`.
-
-4th Nov 2019 V0.5.0  
-SSL/TLS now tested successfully on Pyboard D.  
-Fix bug where ESP8266 could hang attempting to connect.  
-Can now reconnect after disconnect is issued.  
-Now supports concurrent qos==1 publications and subscriptions.  
-**API change** The disconnect method is now asynchronous.
-
-24th Sept 2019  
-**API change:** the subscription callback requires an additional parameter for
-the retained message flag.  
-On ESP8266 the code disables automatic sleep: this reduces reconnects at cost
-of increased power consumption.  
 
 ## 1.4 ESP8266 limitations
 
 The module is too large to compile on the ESP8266 and should be precompiled or
 preferably frozen as bytecode. On the reference board with `uasyncio` and
 `mqtt_as` frozen, the demo script `range_ex` reports 21.8K of free RAM while
-running.
+running. The code disables automatic sleep: this reduces reconnects at cost of
+increased power consumption.
 
 Notes on the Sonoff Basic R3 may be found [here](../sonoff/SONOFF.md).
 
@@ -151,6 +141,14 @@ has been abandoned by its author and is no longer supported.
 The library has been tested successfully with the Pyboard D SF2W and SF6W. In
 testing it has clocked up eight weeks of continuous runtime and nearly 1M
 messages without failure or data loss.
+
+## 1.7 Arduino Nano RP2040 Connect
+
+Firmware must be dated 22 Apr 22 or later. NINA firmware must be 1.4.8 or
+later - see
+[this doc](https://docs.arduino.cc/tutorials/nano-rp2040-connect/rp2040-upgrading-nina-firmware).
+Reading RSSI seems to break the WiFi link so should be avoided - the
+`range_ex.py` demo disables this on this platform.
 
 ###### [Contents](./README.md#1-contents)
 
@@ -176,15 +174,8 @@ messages without failure or data loss.
  Pyboard D. Publishes every 20s and subscribes to same topic. Connection to
  this public broker, though encrypted, is insecure because anyone can
  subscribe.
-
-### Experimental scripts
-
- 1. `lowpower.py` Pyboard D micro-power test. See [Section 5](./README.md#5-low-power-demo).
- 2. `tls8266.py` SSL/TLS connectionfor ESP8266. Fails with 
- `ssl_handshake_status: -4`.
-
-Re TLS: It seems that the problem is due to lack of firmware support for TLS
-on nonblocking sockets.
+ 8. `tls8266.py` SSL/TLS connectionfor ESP8266. Shows how to use keys and
+ certificates. For obvious reasons it requires editing to run.
 
 ### config.py
 
@@ -209,11 +200,6 @@ config['wifi_pw'] = 'my_password'
 ###### [Contents](./README.md#1-contents)
 
 ## 2.2 Installation
-
-The only dependency is uasyncio from the [MicroPython library](https://github.com/micropython/micropython-lib).
-Many firmware builds include this by default. Otherwise ensure it is installed
-on the device. Installation is described in the tutorial in
-[this repo](https://github.com/peterhinch/micropython-async).
 
 The module is too large to compile on the ESP8266. It must either be cross
 compiled or (preferably) built as frozen bytecode: copy `mqtt_as.py` to
@@ -352,7 +338,7 @@ received when connectivity resumes. This is standard MQTT behaviour (MQTT spec
 section 3.1.2.4). If the outage is prolonged this can imply a substantial
 backlog. On the ESP8266 this can cause buffer overflows in the Espressif WiFi
 stack causing `LmacRxBlk:1` errors to appear. 
-[see](http://docs.micropython.org/en/latest/esp8266/esp8266/general.html)
+[see this doc](http://docs.micropython.org/en/latest/esp8266/esp8266/general.html).
 
 `clean_init` should normally be `True`. If `False` the system will attempt
 to restore a prior session on the first connection. This may result in a large
@@ -551,41 +537,38 @@ disrupt the MQTT protocol. There are several ways to address this:
 This was not included in the library mainly because most use cases are covered
 by use of a timestamp. Other reasons are documented in the code comments.
 
+### 4.4.2 Behaviour on power up
+
+The library aims to handle connectivity outages transparently, however power
+cycling of the client must be considered at application level. When the
+application calls the client's `connect` method any failure will cause an
+`OSError` to be raised. This is by design because the action to be taken is
+application-dependent. A check on WiFi or broker function may be required.
+There may be a need to fall back to a different network. In other applications
+brief power outages may be expected: when power resumes the client will simply
+reconnect. If an error occurs the application might wait for a period before
+re-trying.
+
+The behaviour of "clean session" should be considered in this context. If the
+`clean` flag is `False` and a long power outage occurs there may be a large
+backlog of messages. This can cause problems on resource constrained clients,
+notably if the client has been taken out of service for a few days.
+
+The `clean_init` flag aims to address the case where the application normally
+runs with `clean==True`. If `clean_init=False` and `clean=True`, on power up
+existing session state is discarded. Subsequently in the event of connectivity
+outages subscriptions will meet the `qos==1` guarantee.
+
+If on power up both flags are `True` the broker will forward messages pending
+since the last (non-clean) session.
+
 ###### [Contents](./README.md#1-contents)
 
 # 5. Low power demo
 
-This is a somewhat experimental demo and is specific to the Pyboard D.  
-**NOTE** In my latest testing this ran but power consumption was 16mA. The
-behavior of Pyboard D firmware seems inconsistent between releases.
+The original demo has been removed as it required an obsolete version of
+uasyncio.
 
-The `micropower.py` script runs MQTT publications and a subscription. It
-reduces current consumption to about 6mA. It requires the following from the
-[async repo](https://github.com/peterhinch/micropython-async):  
- 1. The `fast_io` version of `uasyncio` must be installed.
- 2. `rtc_time.py` and `rtc_time_cfg.py` must be on the path and must be the
- latest version (17th Oct 2019 or later).
-
-Verify that the `fast_io` version is installed by issuing the following at the
-REPL:
-```python
-import uasyncio as asyncio
-asyncio.version
-```
-The official version will throw an exception; the `fast_io` version will report
-a version number (at the time of writing 0.26).
-
-To activate power saving the USB connection to the Pyboard should be unused.
-This is firstly because USB uses power, and secondly because the power saving
-mechanism would disrupt USB communications. If a USB connection is provided the
-demo will run, but the power saving feature will be disabled.
-
-It is possible to acquire a REPL in this mode using an FTDI adaptor connected
-to one of the Pyboard's UARTs. Use `pyb.repl_uart(uart)`.
-
-One means of powering the Pyboard is to link the Pyboard to a USB power source
-via a USB cable wired for power only. This will ensure that a USB connection is
-not detected.
 
 ###### [Contents](./README.md#1-contents)
 

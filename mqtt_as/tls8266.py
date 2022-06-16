@@ -1,8 +1,7 @@
-# tls8266.py Test of asynchronous mqtt client with SSL. Doesn't actually work:
-# fails on connect with ssl_handshake_status: -4
-# Please help me fix it...
+# tls8266.py Test of asynchronous mqtt client with SSL.
+# Thanks to @SooOverpowered this is now fixed.
 
-# (C) Copyright Peter Hinch 2017-2019.
+# (C) Copyright Peter Hinch 2017-2022.
 # Released under the MIT licence.
 
 # This demo publishes to topic "result" and also subscribes to that topic.
@@ -21,6 +20,12 @@ import uasyncio as asyncio
 from machine import Pin, unique_id
 
 SERVER = 'test.mosquitto.org'
+
+#cert and key must be in der form
+with open('your client key here','rb') as f:
+    KEY=f.read()
+with open('your client cert here', 'rb') as f:
+    CERT=f.read()
 
 # Subscription callback
 def sub_cb(topic, msg, retained):
@@ -60,6 +65,8 @@ config['server'] = SERVER
 config['connect_coro'] = conn_han
 config['wifi_coro'] = wifi_han
 config['ssl'] = True
+config['ssl_params'] = {'do_handshake':False, 'key':KEY, 'cert':CERT} 
+# Set do_handshake to false to defer the SSL handshake, somehow makes ssl connection works
 
 # Set up client
 MQTTClient.DEBUG = True  # Optional
