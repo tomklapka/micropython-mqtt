@@ -18,7 +18,7 @@ application level.
   1.1 [Rationale](./README.md#11-rationale)  
   1.2 [Overview](./README.md#12-overview)  
   1.3 [Project Status](./README.md#13-project-status)  
-  1.4 [ESP8266 Limitations](./README.md#14-esp8266-limitations)  
+  1.4 [ESP8266 limitations](./README.md#14-esp8266-limitations)  
   1.5 [ESP32 Issues](./README.md#15-esp32-issues)  
   1.6 [Pyboard D](./README.md#16-pyboard-d)  
   1.7 [Arduino Nano RP2040 Connect](./README.md#17-arduino-nano-rp2040-connect)  
@@ -37,6 +37,7 @@ application level.
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.2.6 [close](./README.md#326-close)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.2.7 [broker_up](./README.md#327-broker_up)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.2.8 [wan_ok](./README.md#328-wan_ok)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.2.9 [dprint](./README.md#329-dprint)  
   3.3 [Class Variables](./README.md#33-class-variables)  
   3.4 [Module Attribute](./README.md#34-module-attribute)  
  4. [Notes](./README.md#4-notes)  
@@ -46,7 +47,9 @@ application level.
   4.4 [Application Design](./README.md#44-application-design)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.4.1 [Publication Timeouts](./README.md#441-publication-timeouts)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.4.2 [Behaviour on power up](./README.md#442-behaviour-on-power-up)  
- 5. [Low Power Use](./README.md#5-low-power-use) Usage in a micropower application.  
+ 5. [Non standard applications](./README.md#5-non-standard-applications) Usage in specialist and micropower applications.  
+  5.1 [deepsleep](./README.md#51-deepsleep)  
+  5.2 [lightsleep and disconnect](./README.md#52-lightsleep-and-disconnect)  
  6. [References](./README.md#6-references)  
 
 ## 1.1 Rationale
@@ -96,16 +99,26 @@ that use it. It uses nonblocking sockets and does not block the scheduler. The
 design is based on the official `umqtt` library but it has been substantially
 modified for resilience and for asynchronous operation.
 
+It is primarily intended for applications which open a link to the MQTT broker
+aiming to maintainin that link indefinitely. Applications which close and
+re-open the link (e.g. for power saving purposes) are subject to limitations
+detailed in [Non standard applications](./README.md#5-non-standard-applications).
+
 Hardware support: Pyboard D, ESP8266, ESP32, ESP32-S2 and Arduino Nano RP2040
 Connect.  
-Firmware support: Official MicroPython firmware.  
+Firmware support: Official MicroPython firmware V1.19 or later.  
 Broker support: Mosquitto is preferred for its excellent MQTT compliance.  
-Protocol: Currently the module supports a subset of MQTT revision 3.1.1.
+Protocol: The module supports a subset of MQTT revision 3.1.1.
 
 ## 1.3 Project Status
 
 Initial development was by Peter Hinch. Thanks are due to Kevin Köck for
-providing and testing a number of bugfixes and enhancements.
+providing and testing a number of bugfixes and enhancements. Also to other
+contributors, some mentioned below.
+
+5 July 2022 V0.6.4 Implement enhacements from Bob Veringa. Fix bug where tasks
+could fail to be stopped on a brief outage. Subscription callbacks now receive
+bytearrays rather than bytes objects.
 
 10 June 2022
 Lowpower demo removed as it required an obsolete version of `uasyncio`.
@@ -124,10 +137,10 @@ SSL/TLS on ESP32 has now been confirmed working.
 ## 1.4 ESP8266 limitations
 
 The module is too large to compile on the ESP8266 and should be precompiled or
-preferably frozen as bytecode. On the reference board with `uasyncio` and
-`mqtt_as` frozen, the demo script `range_ex` reports 21.8K of free RAM while
-running. The code disables automatic sleep: this reduces reconnects at cost of
-increased power consumption.
+preferably frozen as bytecode. On the reference board with `mqtt_as` frozen,
+the demo script `range_ex` reports 27.4K of free RAM while running. The code
+disables automatic sleep: this reduces reconnects at cost of increased power
+consumption.
 
 Notes on the Sonoff Basic R3 may be found [here](../sonoff/SONOFF.md).
 
@@ -144,8 +157,7 @@ messages without failure or data loss.
 
 ## 1.7 Arduino Nano RP2040 Connect
 
-Firmware must be dated 22 Apr 22 or later. NINA firmware must be 1.4.8 or
-later - see
+NINA firmware must be 1.4.8 or later - see
 [this doc](https://docs.arduino.cc/tutorials/nano-rp2040-connect/rp2040-upgrading-nina-firmware).
 Reading RSSI seems to break the WiFi link so should be avoided - the
 `range_ex.py` demo disables this on this platform.
@@ -355,7 +367,7 @@ Asynchronous.
 
 Keyword only arg:  
  * `quick=False` Setting `quick=True` saves power in some battery applications.
- See [Low Power Use](./README.md#5-low-power-use).
+ See [Non standard applications](./README.md#5-non-standard-applications).
 
 Connects to the specified broker. The application should call `connect` once on
 startup. If this fails (due to WiFi or the broker being unavailable) an
@@ -394,6 +406,9 @@ Args:
  1. `topic` A bytes or bytearray object. Or string as described above.
  2. `qos=0` Integer.
 
+It is possible to subscribe to multiple topics but there can only be one
+subscription callback.
+
 ### 3.2.4 isconnected
 
 Synchronous. No args.
@@ -407,16 +422,16 @@ Asynchronous. No args.
 
 Sends a `DISCONNECT` packet to the broker, closes socket. Disconnection
 suppresses the Will (MQTT spec. 3.1.2.5). This may be done prior to a power
-down. After issuing `disconnect` it is possible to reconnect. Disconnection
-might be done to conserve power or prior to reconnecting to a different broker
-or WiFi network.
+down or deepsleep. For restrictions on the use of this method see
+[lightsleep and disconnect](./README.md#52-lightsleep-and-disconnect).
 
 ### 3.2.6 close
 
 Synchronous. No args.
 
-Closes the socket. For use in development to prevent `LmacRxBlk:1` failures if
-an application raises an exception or is terminated with ctrl-C (see
+Shuts down the WiFi interface and closes the socket. Its main use is in
+development to prevent ESP8266 `LmacRxBlk:1` failures if an application raises
+an exception or is terminated with ctrl-C (see
 [Example Usage](./README.md#23-example-usage).
 
 ### 3.2.7 broker_up
@@ -437,6 +452,12 @@ to '8.8.8.8' and checks for a valid response.
 
 There is a single arg `packet` which is a bytes object being the DNS query. The
 default object queries the Google DNS server.
+
+### 3.2.9 dprint
+
+If the class variable `DEBUG` is true, debug messages are output via `dprint`.
+This method can be redefined in a subclass, for example to log debug output to
+a file. The method takes an arbitrary number of positional args as per `print`.
 
 ## 3.3 Class Variables
 
@@ -568,19 +589,23 @@ since the last (non-clean) session.
 
 ###### [Contents](./README.md#1-contents)
 
-# 5. Low power use
+# 5. Non standard applications
 
 Normal operation of `mqtt_as` is based on attempting to keep the link up as
 much as possible. This assures minimum latency for subscriptions but implies
-power draw. An alternative is periodically to connect, handle publications
-and pending subscriptions, before entering `deepsleep`.
+power draw. The `machine` module supports two power saving modes: `lightsleep`
+and `deepsleep`. Currently `uasyncio` supports neither of these modes. The
+notes below may be relevant to any application which deliberately closes and
+re-opens the link to the broker.
 
-The `mqtt_as` module was not designed for micropower operation and `uasyncio`
-does not support power saving. However with suitable hardware it is possible to
-produce an MQTT client with very low average power consumption. This is done by
-keeping the application run time short and setting `machine.deepsleep` to sleep
-for a period. When the period expires the board resets and `main.py` re-starts
-the application.
+## 5.1 deepsleep
+
+Maximum power savings may be achieved by periodically connecting, handling
+publications and pending subscriptions, and entering `deepsleep`. With suitable
+hardware it is possible to produce an MQTT client with very low average power
+consumption. This is done by keeping the application run time short and using
+`machine.deepsleep` to sleep for a period. When the period expires the board
+resets and `main.py` re-starts the application.
 
 Hardware tested was the [UM Feather S2](https://feathers2.io/) available from
 [Adafruit](https://www.adafruit.com/product/4769). My sample consumes only 66μA
@@ -589,10 +614,12 @@ to be powered down when the host is in deepsleep. It also supports battery
 operation via a LiPo cell with USB charging. A Pyboard D with WBUS-DIP28 has
 similar properties.
 
-The test script `lptest_min.py` wakes up periodically and connects to WiFi. It
-publishes the value from the onboard light sensor, and subscribes to the topic
-"foo_topic". Any matching publications which occured during deepsleep are
-received and revealed by flashing the blue LED.
+The test script
+[lptest_min.py](https://github.com/peterhinch/micropython-mqtt/blob/master/mqtt_as/lptest_min.py)
+wakes up periodically and connects to WiFi. It publishes the value from the
+onboard light sensor, and subscribes to the topic "foo_topic". Any matching
+publications which occured during deepsleep are received and revealed by
+flashing the blue LED.
 
 Note that `deepsleep` disables USB. This is inconvenient in development. The
 script has a test mode in which deepsleep is replaced by `time.sleep` and
@@ -603,8 +630,9 @@ deep sleep.
 Each time the client goes into deepsleep it issues `.disconnect()`. This sends
 an MQTT `DISCONNECT` packet to the broker suppressing the last will as per MQTT
 spec para 3.1.2.5. The reasoning is that deepsleep periods are likely to be
-much longer than the keepalive time. Consequently the last will message is only
-triggered in the event of a failure such as a program crash.
+much longer than the keepalive time. Using `.disconnect()` ensures that a last
+will message is only triggered in the event of a failure such as a program
+crash.
 
 In applications which close the connection and deepsleep, power consumption may
 be further reduced by setting the `quick` arg to `.connect`. On connecting or
@@ -613,6 +641,23 @@ is stable. Quick connection skips this check on initial connection only, saving
 several seconds. The reasoning here is that any error in initial connection
 must be handled by the application. The test script sleeps for `retry` seconds
 before re-trying the connection.
+
+## 5.2 lightsleep and disconnect
+
+The library is not designed for use in cases where the system goes into
+lightsleep. Firstly `uasyncio` does not support lightsleep on all platforms -
+notably on STM where the `ticks_ms` clock (crucial to task scheduling) stops
+for the duration of lightsleep.
+
+Secondly the library has no mechanism to ensure all tasks are shut down cleanly
+after issuing `.disconnect`. This calls into question any application that
+issues `.disconnect` and then attempts to reconnect. This issue does not arise
+with `deepsleep` because the host effectively powers down. When the sleep
+ends, `uasyncio` and necessary tasks start as in a power up event.
+
+These problems have been resolved by users for specific applications with forks
+of the library. Given the limitations of `uasyncio` I do not plan to write a
+general solution.
 
 ###### [Contents](./README.md#1-contents)
 

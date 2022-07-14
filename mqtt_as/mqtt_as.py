@@ -25,7 +25,7 @@ import network
 gc.collect()
 from sys import platform
 
-VERSION = (0, 6, 3)
+VERSION = (0, 6, 4)
 
 # Default short delay for good SynCom throughput (avoid sleep(0) with SynCom).
 _DEFAULT_MS = const(20)
@@ -156,21 +156,28 @@ class MQTT_base:
     async def _as_read(self, n, sock=None):  # OSError caught by superclass
         if sock is None:
             sock = self._sock
-        data = b''
+        # Declare a byte array of size n. That space is needed anyway, better
+        # to just 'allocate' it in one go instead of appending to an
+        # existing object, this prevents reallocation and fragmentation.
+        data = bytearray(n)
+        buffer = memoryview(data)
+        size = 0
         t = ticks_ms()
-        while len(data) < n:
+        while size < n:
             if self._timeout(t) or not self.isconnected():
-                raise OSError(-1)
+                raise OSError(-1, 'Timeout on socket read')
             try:
-                msg = sock.read(n - len(data))
+                msg = sock.read(n - size)
             except OSError as e:  # ESP32 issues weird 119 errors here
                 msg = None
                 if e.args[0] not in BUSY_ERRORS:
                     raise
             if msg == b'':  # Connection closed by host
-                raise OSError(-1)
+                raise OSError(-1, 'Connection closed by host')
             if msg is not None:  # data received
-                data = b''.join((data, msg))
+                msg_size = len(msg)
+                buffer[size:size + msg_size] = msg
+                size += msg_size
                 t = ticks_ms()
                 self.last_rx = ticks_ms()
             await asyncio.sleep_ms(_SOCKET_POLL_DELAY)
@@ -179,12 +186,15 @@ class MQTT_base:
     async def _as_write(self, bytes_wr, length=0, sock=None):
         if sock is None:
             sock = self._sock
+
+        # Wrap bytes in memoryview to avoid copying during slicing
+        bytes_wr = memoryview(bytes_wr)
         if length:
             bytes_wr = bytes_wr[:length]
         t = ticks_ms()
         while bytes_wr:
             if self._timeout(t) or not self.isconnected():
-                raise OSError(-1)
+                raise OSError(-1, 'Timeout on socket write')
             try:
                 n = sock.write(bytes_wr)
             except OSError as e:  # ESP32 issues weird 119 errors here
@@ -260,7 +270,7 @@ class MQTT_base:
         resp = await self._as_read(4)
         self.dprint('Connected to broker.')  # Got CONNACK
         if resp[3] != 0 or resp[0] != 0x20 or resp[1] != 0x02:
-            raise OSError(-1)  # Bad CONNACK e.g. authentication fail.
+            raise OSError(-1, 'Bad CONNACK')  # Bad CONNACK e.g. authentication fail.
 
     async def _ping(self):
         async with self.lock:
@@ -306,13 +316,16 @@ class MQTT_base:
         return False
 
     async def disconnect(self):
-        try:
-            async with self.lock:
-                self._sock.write(b"\xe0\0")
-        except OSError:
-            pass
+        if self._sock is not None:
+            await self._kill_tasks(False)  # Keep socket open
+            try:
+                async with self.lock:
+                    self._sock.write(b"\xe0\0")  # Close broker connection
+                    await asyncio.sleep_ms(100)
+            except OSError:
+                pass
+            self._close()
         self._has_connected = False
-        self._close()
 
     def _close(self):
         if self._sock is not None:
@@ -320,6 +333,10 @@ class MQTT_base:
 
     def close(self):  # API. See https://github.com/peterhinch/micropython-mqtt/issues/60
         self._close()
+        try:
+            self._sta_if.disconnect()  # Disconnect Wi-Fi to avoid errors
+        except OSError:
+            self.dprint('Wi-Fi not started, unable to disconnect interface')
         self._sta_if.active(False)
 
     async def _await_pid(self, pid):
@@ -407,7 +424,7 @@ class MQTT_base:
         if res is None:
             return
         if res == b'':
-            raise OSError(-1)
+            raise OSError(-1, 'Empty response')
 
         if res == b"\xd0":  # PINGRESP
             await self._as_read(1)  # Update .last_rx time
@@ -417,23 +434,23 @@ class MQTT_base:
         if op == 0x40:  # PUBACK: save pid
             sz = await self._as_read(1)
             if sz != b"\x02":
-                raise OSError(-1)
+                raise OSError(-1, 'Invalid PUBACK packet')
             rcv_pid = await self._as_read(2)
             pid = rcv_pid[0] << 8 | rcv_pid[1]
             if pid in self.rcv_pids:
                 self.rcv_pids.discard(pid)
             else:
-                raise OSError(-1)
+                raise OSError(-1, 'Invalid pid in PUBACK packet')
 
         if op == 0x90:  # SUBACK
             resp = await self._as_read(4)
             if resp[3] == 0x80:
-                raise OSError(-1)
+                raise OSError(-1, 'Invalid SUBACK packet')
             pid = resp[2] | (resp[1] << 8)
             if pid in self.rcv_pids:
                 self.rcv_pids.discard(pid)
             else:
-                raise OSError(-1)
+                raise OSError(-1, 'Invalid pid in SUBACK packet')
 
         if op & 0xf0 != 0x30:
             return
@@ -454,7 +471,7 @@ class MQTT_base:
             struct.pack_into("!H", pkt, 2, pid)
             await self._as_write(pkt)
         elif op & 6 == 4:  # qos 2 not supported
-            raise OSError(-1)
+            raise OSError(-1, 'QoS 2 not supported')
 
 
 # MQTTClient class. Handles issues relating to connectivity.
@@ -470,6 +487,7 @@ class MQTTClient(MQTT_base):
             self._ping_interval = p_i
         self._in_connect = False
         self._has_connected = False  # Define 'Clean Session' value to use.
+        self._tasks = []
         if ESP8266:
             import esp
             esp.sleep_type(0)  # Improve connection integrity at cost of power consumption.
@@ -507,13 +525,13 @@ class MQTTClient(MQTT_base):
                     break
 
         if not s.isconnected():  # Timed out
-            raise OSError
+            raise OSError('Wi-Fi connect timed out')
         if not quick:  # Skip on first connection only if power saving
             # Ensure connection stays up for a few secs.
             self.dprint('Checking WiFi integrity.')
             for _ in range(5):
                 if not s.isconnected():
-                    raise OSError  # in 1st 5 secs
+                    raise OSError('Connection Unstable')  # in 1st 5 secs
                 await asyncio.sleep(1)
             self.dprint('Got reliable connection')
 
@@ -540,6 +558,7 @@ class MQTTClient(MQTT_base):
             await self._connect(self._clean)
         except Exception:
             self._close()
+            self._in_connect = False  # Caller may run .isconnected()
             raise
         clean = self._clean if self._has_connected else self._clean_init
         self.rcv_pids.clear()
@@ -552,10 +571,10 @@ class MQTTClient(MQTT_base):
             asyncio.create_task(
                 self._keep_connected())  # Runs forever unless user issues .disconnect()
 
-        asyncio.create_task(self._handle_msg())  # Tasks quit on connection fail.
-        asyncio.create_task(self._keep_alive())
+        asyncio.create_task(self._handle_msg())  # Task quits on connection fail.
+        self._tasks.append(asyncio.create_task(self._keep_alive()))
         if self.DEBUG:
-            asyncio.create_task(self._memory())
+            self._tasks.append(asyncio.create_task(self._memory()))
         asyncio.create_task(self._connect_handler(self))  # User handler.
 
     # Launched by .connect(). Runs until connectivity fails. Checks for and
@@ -586,16 +605,20 @@ class MQTTClient(MQTT_base):
                 break
         self._reconnect()  # Broker or WiFi fail.
 
+    async def _kill_tasks(self, kill_skt):  # Cancel running tasks
+        for task in self._tasks:
+            task.cancel()
+        self._tasks.clear()
+        await asyncio.sleep_ms(0)  # Ensure cancellation complete
+        if kill_skt:  # Close socket
+            self._close()
+
     # DEBUG: show RAM messages.
     async def _memory(self):
-        count = 0
-        while self.isconnected():  # Ensure just one instance.
-            await asyncio.sleep(1)  # Quick response to outage.
-            count += 1
-            count %= 20
-            if not count:
-                gc.collect()
-                print('RAM free {} alloc {}'.format(gc.mem_free(), gc.mem_alloc()))
+        while True:
+            await asyncio.sleep(20)
+            gc.collect()
+            self.dprint(f"RAM free {gc.mem_free()} alloc {gc.mem_alloc()}")
 
     def isconnected(self):
         if self._in_connect:  # Disable low-level check during .connect()
@@ -607,7 +630,7 @@ class MQTTClient(MQTT_base):
     def _reconnect(self):  # Schedule a reconnection if not underway.
         if self._isconnected:
             self._isconnected = False
-            self._close()
+            asyncio.create_task(self._kill_tasks(True))  # Shut down tasks and socket
             asyncio.create_task(self._wifi_handler(False))  # User handler.
 
     # Await broker connection.
@@ -622,8 +645,11 @@ class MQTTClient(MQTT_base):
             if self.isconnected():  # Pause for 1 second
                 await asyncio.sleep(1)
                 gc.collect()
-            else:
-                self._sta_if.disconnect()
+            else:  # Link is down, socket is closed, tasks are killed
+                try:
+                    self._sta_if.disconnect()
+                except OSError:
+                    self.dprint('Wi-Fi not started, unable to disconnect interface')
                 await asyncio.sleep(1)
                 try:
                     await self.wifi_connect()
