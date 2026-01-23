@@ -25,9 +25,9 @@ application level.
 
 ### Warning: firmware >= V1.22.0
 
-V1.22.0 included a changed IDF version 5.0.4: on ESPx the package should be
-replaced with the latest version, otherwise recovery from an outage may not
-occur.
+V1.22.0 included a changed IDF version 5.0.4. If upgrading firmware on ESPx the
+MQTT package should also be the latest version, otherwise recovery from an
+outage may not occur.
 
 # 1. Contents
 
@@ -43,8 +43,8 @@ occur.
   1.9 [Limitations](./README.md#19-limitations) Please read this.  
   1.10 [MQTTv5](./README.md#110-mqttv5) Which version should you use?  
  2. [Getting started](./README.md#2-getting_started)  
-  2.1 [Program files](./README.md#21-program-files)  
-  2.2 [Installation](./README.md#22-installation)  
+  2.1 [Program files](./README.md#21-program-files) Quick installation and setup.  
+  2.2 [Installation on ESP8266](./README.md#22-installation-on-esp8266)  
   2.3 [Example Usage](./README.md#23-example-usage) Using the event interface.  
   2.4 [Usage with callbacks](./README.md#24-usage-with-callbacks)  
  3. [MQTTClient class](./README.md#3-mqttclient-class)  
@@ -303,7 +303,8 @@ The first two of these demonstrate the event interface. Others use callbacks.
 
 ### Quick install
 
-ESP8266: please read [Installation](./README.md#22-installation). On other
+ESP8266: please read
+[Installation on ESP8266](./README.md#22-installation-on-esp8266). On other
 platforms the main module, demos 1 to 3 and the sample `mqtt_local_example.py`
 may be installed from a connected PC with :
 ```bash
@@ -353,7 +354,7 @@ config['wifi_pw'] = 'my_password'
 
 ###### [Contents](./README.md#1-contents)
 
-## 2.2 Installation
+## 2.2 Installation on ESP8266
 
 The module is too large to compile on the ESP8266. It must either be cross
 compiled or (preferably) built as frozen bytecode: copy `__init__.py` to
