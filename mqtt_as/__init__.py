@@ -834,7 +834,7 @@ class MQTTClient(MQTT_base):
                 # A delay > 0 is necessary for webrepl compatibility.
                 await asyncio.sleep_ms(5)  # Let other tasks get lock
 
-        except OSError:
+        except (OSError, AttributeError):
             pass
         self._reconnect()  # Broker or WiFi fail.
 
